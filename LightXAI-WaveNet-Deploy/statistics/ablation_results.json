@@ -1,0 +1,22 @@
+[
+  {
+    "model": "baseline_cnn",
+    "best_auc": 0.5531646052038317
+  },
+  {
+    "model": "cnn_dwt",
+    "best_auc": 0.5821390862685338
+  },
+  {
+    "model": "cnn_dwt_svd",
+    "best_auc": 0.5721087445846865
+  },
+  {
+    "model": "cnn_dwt_svd_vit",
+    "best_auc": 0.5570853049250951
+  },
+  {
+    "model": "lightxai_wavenet_5class_final",
+    "best_auc": 0.8068
+  }
+]

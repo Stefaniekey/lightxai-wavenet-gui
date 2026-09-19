@@ -1,0 +1,17 @@
+{
+  "total_samples": 887,
+  "label_distribution": {
+    "0": 20,
+    "1": 263,
+    "2": 208,
+    "3": 175,
+    "4": 221
+  },
+  "label_names": {
+    "0": "C0 (Normal)",
+    "1": "C1 (Tiny Benign)",
+    "2": "C2 (Tiny Malignant)",
+    "3": "C3 (Large Benign)",
+    "4": "C4 (Large Malignant)"
+  }
+}
