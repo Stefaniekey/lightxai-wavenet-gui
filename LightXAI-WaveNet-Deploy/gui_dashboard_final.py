@@ -1,14 +1,12 @@
 """
-gui_dashboard_pro.py — LightXAI-WaveNet Clinical Dashboard (Streamlit) FINAL PRO v2
-=====================================================================================
-Layout mengikuti referensi dosen:
-- DICOM Viewer besar + panel kanan (Prediction, Clinical Decision, ROI)
-- ROI Information: crop citra + info + 3D volume INTERAKTIF (bisa diputar)
-- Workflow horizontal (Lung Seg → Candidates → ROI → DWT → SVD)
-- CNN / ViT / Fusion 3 kolom dengan bar besar
-- Metrics + ROC + CM (dark blue elegant) + Ablation
+gui_dashboard_pro.py — LightXAI-WaveNet Clinical Dashboard (Streamlit) FINAL
+=============================================================================
+FIX untuk Streamlit Cloud:
+- Auto-detect BASE_DIR (lokal & cloud)
+- Auto-detect path model & JSON files
+- Debug info tampil di dashboard kalau ada error
 
-CARA MENJALANKAN:
+CARA MENJALANKAN (LOKAL):
     pip install streamlit torch opencv-python-headless pillow plotly pandas PyWavelets numpy fpdf2 pydicom scipy
     streamlit run gui_dashboard_pro.py
 """
@@ -47,14 +45,79 @@ except Exception:
     SCIPY_OK = False
 
 # ============================================================
-# SETUP
+# SETUP PATH — AUTO-DETECT (LOKAL & CLOUD)
 # ============================================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+_CWD = os.getcwd()
+
+# Kandidat folder root (tempat folder experiments/, metrics/, statistics/, src/)
+_CANDIDATE_BASES = [
+    _CURRENT_DIR,                                              # file di root
+    os.path.join(_CURRENT_DIR, "LightXAI-WaveNet-Deploy"),    # file di parent, folder di child
+    os.path.join(_CURRENT_DIR, "..", "LightXAI-WaveNet-Deploy"),
+    _CWD,                                                      # CWD
+    os.path.join(_CWD, "LightXAI-WaveNet-Deploy"),
+    "/mount/src/lightxai-wavenet-gui/LightXAI-WaveNet-Deploy",  # Streamlit Cloud
+    "/mount/src/lightxai-wavenet-gui",
+]
+
+BASE_DIR = None
+for _cand in _CANDIDATE_BASES:
+    _cand_abs = os.path.abspath(_cand)
+    # Cek apakah folder ini punya src/model_small.py ATAU experiments/.../best_model.pth
+    _has_src = os.path.exists(os.path.join(_cand_abs, "src", "model_small.py"))
+    _has_model = os.path.exists(os.path.join(_cand_abs, "experiments", "lightxai_wavenet_5class_final", "best_model.pth"))
+    _has_metrics = os.path.exists(os.path.join(_cand_abs, "metrics", "test_metrics.json")) or \
+                   os.path.exists(os.path.join(_cand_abs, "results", "metrics", "test_metrics.json"))
+    
+    if _has_src or _has_model or _has_metrics:
+        BASE_DIR = _cand_abs
+        break
+
+if BASE_DIR is None:
+    BASE_DIR = _CURRENT_DIR
+
+# Path untuk src
 sys.path.append(os.path.join(BASE_DIR, "src"))
+sys.path.append(os.path.join(_CURRENT_DIR, "src"))
+
+# Path untuk model
 MODEL_PATH = os.path.join(BASE_DIR, "experiments", "lightxai_wavenet_5class_final", "best_model.pth")
-METRICS_JSON = os.path.join(BASE_DIR, "results", "metrics", "test_metrics.json")
-PER_CLASS_JSON = os.path.join(BASE_DIR, "results", "statistics", "per_class_metrics.json")
-ABLATION_JSON = os.path.join(BASE_DIR, "results", "statistics", "ablation_results.json")
+if not os.path.exists(MODEL_PATH):
+    MODEL_PATH = os.path.join(_CURRENT_DIR, "experiments", "lightxai_wavenet_5class_final", "best_model.pth")
+if not os.path.exists(MODEL_PATH):
+    MODEL_PATH = os.path.join(_CWD, "experiments", "lightxai_wavenet_5class_final", "best_model.pth")
+
+# Path untuk metrics JSON (coba beberapa lokasi)
+def _find_file(rel_paths):
+    """Cari file dari beberapa kandidat path relatif."""
+    for rel in rel_paths:
+        p = os.path.join(BASE_DIR, rel)
+        if os.path.exists(p):
+            return p
+        p = os.path.join(_CURRENT_DIR, rel)
+        if os.path.exists(p):
+            return p
+        p = os.path.join(_CWD, rel)
+        if os.path.exists(p):
+            return p
+    return os.path.join(BASE_DIR, rel_paths[0])  # fallback (akan return path default)
+
+METRICS_JSON = _find_file([
+    "metrics/test_metrics.json",
+    "results/metrics/test_metrics.json",
+])
+
+PER_CLASS_JSON = _find_file([
+    "statistics/per_class_metrics.json",
+    "results/statistics/per_class_metrics.json",
+])
+
+ABLATION_JSON = _find_file([
+    "statistics/ablation_results.json",
+    "results/statistics/ablation_results.json",
+])
+
 PRED_LOG_CSV = os.path.join(BASE_DIR, "results", "predictions", "dashboard_log.csv")
 
 VOLUME_DEPTH = 8
@@ -331,25 +394,78 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 # ============================================================
-# LOAD MODEL
+# LOAD MODEL — DENGAN DEBUG INFO
 # ============================================================
 @st.cache_resource
 def load_model():
+    import traceback
+
+    # ==== DEBUG INFO ====
+    debug_lines = [
+        f"BASE_DIR = {BASE_DIR}",
+        f"CWD = {_CWD}",
+        f"__file__ = {__file__}",
+        f"MODEL_PATH = {MODEL_PATH}",
+        f"Model exists = {os.path.exists(MODEL_PATH)}",
+        f"METRICS_JSON = {METRICS_JSON}",
+        f"METRICS exists = {os.path.exists(METRICS_JSON)}",
+        f"ABLATION_JSON = {ABLATION_JSON}",
+        f"ABLATION exists = {os.path.exists(ABLATION_JSON)}",
+    ]
+    try:
+        if os.path.exists(BASE_DIR):
+            debug_lines.append(f"Isi BASE_DIR: {os.listdir(BASE_DIR)}")
+    except Exception as e:
+        debug_lines.append(f"Error listing BASE_DIR: {e}")
+
+    # Print debug ke stdout juga (biar muncul di log Streamlit Cloud)
+    print("[DEBUG] " + "\n[DEBUG] ".join(debug_lines))
+
+    # ==== COBA IMPORT MODEL ====
     try:
         from model_small import LightXAIWaveNetSmall
+        print("[DEBUG] ✅ Import model_small BERHASIL")
     except Exception as e:
-        return None, None, False, f"Gagal import model_small: {e}"
+        err = f"Gagal import model_small: {e}\n\n{traceback.format_exc()}"
+        print(f"[ERROR] {err}")
+        # Simpan debug info ke session_state untuk ditampilkan nanti
+        st.session_state["_debug_info"] = "\n".join(debug_lines)
+        st.session_state["_debug_error"] = err
+        return None, None, False, err
+
+    # ==== COBA BIKIN MODEL ====
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = LightXAIWaveNetSmall(num_classes=5).to(device)
+
+    try:
+        model = LightXAIWaveNetSmall(num_classes=5).to(device)
+    except Exception as e:
+        err = f"Gagal bikin model: {e}\n\n{traceback.format_exc()}"
+        print(f"[ERROR] {err}")
+        st.session_state["_debug_info"] = "\n".join(debug_lines)
+        st.session_state["_debug_error"] = err
+        return None, device, False, err
+
+    # ==== COBA CEK FILE MODEL ====
     if not os.path.exists(MODEL_PATH):
-        return None, device, False, f"Model tidak ditemukan: {MODEL_PATH}"
+        err = f"Model TIDAK DITEMUKAN di: {MODEL_PATH}"
+        print(f"[ERROR] {err}")
+        st.session_state["_debug_info"] = "\n".join(debug_lines)
+        st.session_state["_debug_error"] = err
+        return None, device, False, err
+
+    # ==== COBA LOAD STATE DICT ====
     try:
         state = torch.load(MODEL_PATH, map_location=device)
         model.load_state_dict(state)
         model.eval()
+        print("[DEBUG] ✅ Model berhasil dimuat!")
         return model, device, True, None
     except Exception as e:
-        return None, device, False, f"Gagal memuat state_dict: {e}"
+        err = f"Gagal load state_dict: {e}\n\n{traceback.format_exc()}"
+        print(f"[ERROR] {err}")
+        st.session_state["_debug_info"] = "\n".join(debug_lines)
+        st.session_state["_debug_error"] = err
+        return None, device, False, err
 
 
 model, device, model_loaded, model_error = load_model()
@@ -789,7 +905,6 @@ def build_wireframe_cube():
 
 
 def build_3d_roi_volume(gray128, region, vol_size=32):
-    """Bikin volume 3D dari crop ROI, tampilkan sebagai Plotly Volume (bisa diputar)."""
     cx_px = int(round(region["cx"] / region["w"] * 128))
     cy_px = int(round(region["cy"] / region["h"] * 128))
     crop_size = 48
@@ -1023,6 +1138,16 @@ def render_header():
     </div>
     """, unsafe_allow_html=True)
 
+    # ==== DEBUG INFO — muncul kalau model gagal load ====
+    if not model_loaded:
+        debug_info = st.session_state.get("_debug_info", "")
+        debug_err = st.session_state.get("_debug_error", model_error or "Unknown error")
+        with st.expander("🔍 DEBUG: Kenapa model tidak dimuat? (klik untuk expand)", expanded=True):
+            st.error(f"**Error:** {debug_err}")
+            if debug_info:
+                st.code(debug_info)
+            st.info("📋 Copy-paste error di atas ke ChatGPT/mentor untuk bantuan.")
+
 
 def render_workflow_flow():
     st.markdown(f"""
@@ -1236,7 +1361,7 @@ def render_center_panel():
 
 
 # ============================================================
-# RIGHT PANEL — dengan 3D ROI interaktif
+# RIGHT PANEL
 # ============================================================
 def render_right_panel():
     if "gray128" not in st.session_state:
@@ -1308,7 +1433,6 @@ def render_right_panel():
         if log_prediction_to_csv(meta, probe, cam_result, diam_mm, risk):
             st.session_state[log_key] = True
 
-    # CLINICAL DECISION
     st.markdown(f"""
     <div class="card">
         <div class="card-title">Clinical Decision</div>
@@ -1330,7 +1454,6 @@ def render_right_panel():
     </div>
     """, unsafe_allow_html=True)
 
-    # ROI INFO
     st.markdown('<div class="card"><div class="card-title">ROI Information</div>',
                 unsafe_allow_html=True)
     roi_col1, roi_col2 = st.columns([1, 1])
@@ -1458,7 +1581,7 @@ def render_workflow_row():
 
 
 # ============================================================
-# FEATURE ROW — dengan Fusion Diperbesar
+# FEATURE ROW
 # ============================================================
 def render_feature_row():
     if "gray128" not in st.session_state or "probe" not in st.session_state:
