@@ -1,0 +1,13 @@
+{
+  "total_samples": 624,
+  "class_distribution": {
+    "NORMAL": 234,
+    "BACTERIA": 242,
+    "VIRUS": 148
+  },
+  "class_names": {
+    "0": "NORMAL",
+    "1": "BACTERIA",
+    "2": "VIRUS"
+  }
+}

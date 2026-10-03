@@ -1,0 +1,11 @@
+{
+  "train": 436,
+  "val": 94,
+  "test": 94,
+  "total": 624,
+  "class_distribution": {
+    "NORMAL": 234,
+    "BACTERIA": 242,
+    "VIRUS": 148
+  }
+}
